@@ -2,11 +2,13 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-**module-pipeline** is a Claude Code plugin that builds a project from a written
-spec using a team of agents. The work is split into modules, and each module
+**module-pipeline** is a Claude Code plugin for game development. It builds a
+game from a written spec using a team of agents. The code is divided the way a
+game stays maintainable: a data layer, reusable systems that each do one thing
+and never reference each other, and small glue modules that connect them. Each
 agent is fenced into its own folder. Agents write in parallel, each accepted
-module becomes its own git commit, reviewers check every stage, and failed
-work goes back into a planned rework run.
+task becomes its own git commit, reviewers check every stage, and failed work
+goes back into a planned rework run.
 
 This repository is a Claude Code plugin marketplace that contains that one
 plugin, in [`plugins/module-pipeline`](plugins/module-pipeline/).
@@ -62,20 +64,32 @@ of something a prompt merely asks for:
 | Reviews are shallow or skipped | Every module gets a read-only adversarial reviewer, and the integrated system gets a system reviewer that checks spec coverage. |
 | Failures pile up with no plan | Failures and blocking review items become a structured rework manifest, decided by the architect and approved by you. |
 
-It was built for game projects (Godot, Unity, and similar), where features map
-naturally onto folders such as `player/`, `enemy/` and `hud/`. It works for any
-codebase that splits cleanly into modules.
+It is made for game projects: browser games and engines such as Godot and
+Unity. What it plans is a game architecture: gameplay data kept apart from
+code, systems such as player movement, health or a wave spawner, glue modules
+such as an enemy manager, and a simulation half kept apart from the view. It
+is not tuned for other kinds of software.
 
 ## What it does
 
 - **Plans from a spec.** Your Claude Code session acts as the *Main Architect*.
-  It reads the spec, estimates the project's size, designs a shared layer and a
-  module map sized to it, writes architecture, contract and conventions docs,
-  scaffolds stub files, writes one prompt per module, and produces a validated
-  task manifest.
-- **Builds a shared layer first.** Helpers, constants, theme values and test
-  fixtures that several modules need are built by one module in the first wave,
-  and every other module imports them instead of writing its own copy.
+  It reads the spec, divides the code by what it does, decides from the
+  project's size how many agents build it, designs the shared layer, writes
+  architecture, contract and conventions docs, scaffolds stub files, writes
+  one prompt per task, and produces a validated task manifest.
+- **Divides the code by function, not by size.** A plan has three kinds of
+  code. *Data* (tuning values, texts, ids) is designed first and kept in one
+  data layer. *Systems* each do one thing, live in their own folder, read the
+  data and never reference each other; two that cannot be separated become
+  one. *Glue* connects systems, and is split by function too: small glue
+  modules instead of one manager for everything. Logic and presentation are
+  two halves, each with its own systems, glue and data, and presentation only
+  reads the logic's state. A *task* is what one agent builds: a folder of
+  systems, or of glue modules. The project's size decides only how many tasks
+  there are.
+- **Builds a shared layer first.** The data layer, helpers and test
+  fixtures that several systems need are built by one task in the first wave,
+  and every other task imports them instead of writing its own copy.
 - **Settles the cross-module rules up front.** Module agents see contracts,
   never each other's code, so a question several modules must answer the same
   way (how time advances and is compared, where state lives and what resets
@@ -83,10 +97,11 @@ codebase that splits cleanly into modules.
   different answer in each. The architect answers them once in
   `docs/cross_module_rules.md`, the shared layer provides the code behind
   each rule, and the system reviewer audits every rule across all modules.
-- **Implements modules in parallel.** A Claude Code dynamic workflow starts one
-  agent per module, each in its own isolated git worktree. Modules run in
-  dependency *waves*: a module starts only after the modules it depends on are
-  merged.
+- **Builds the tasks in parallel.** A Claude Code dynamic workflow starts one
+  agent per task, each in its own isolated git worktree. Tasks run in
+  *waves*: the shared layer, then every task of systems at once (they do not
+  depend on each other), then the glue tasks, each once the tasks it joins
+  are merged.
 - **Enforces write scopes.** Before writing anything, each agent must *claim*
   its worktree for its task, which also moves the worktree to the run branch
   tip. After that, the hook only lets it edit its own folder, its test folder
@@ -97,17 +112,19 @@ codebase that splits cleanly into modules.
   git hooks still running. Generated files outside the scope are dropped.
   Anything else outside the scope is refused and the worktree is kept so you
   can inspect it.
-- **Reviews every module.** A read-only reviewer checks the acceptance
-  criteria, the contract, the tests and obvious bugs. It returns structured
+- **Reviews every task.** A read-only reviewer checks the acceptance
+  criteria, the contract, the tests, obvious bugs, and that no system reaches
+  into another or writes values that belong in the data layer. It returns structured
   rework items with a severity and a flag saying whether each one blocks
   integration.
 - **Runs diagnostics.** If you configure a build or typecheck command, it runs
   after the modules merge and its errors and warnings are counted. If you
   configure a test command, the whole suite runs too, catching cross-module
   breakage that each module's own tests miss.
-- **Integrates.** A separate stage writes the glue code that composes the
-  modules, under the same scope rules. A system reviewer then scores the result
-  against every requirement in the spec.
+- **Integrates.** The last stage writes the entry point, the top layer of
+  glue and the one place that calls the systems in order, under the same
+  scope rules. A system reviewer then scores the result against every
+  requirement in the spec.
 - **Plans rework.** The architect turns every failure into a decision (rework
   the same module, create a new one, change a contract, defer, or ask you) and
   writes the next run's manifest. Small local fixes go out as one *patch*: a
@@ -135,8 +152,8 @@ codebase that splits cleanly into modules.
   architect wrote into `docs/conventions.md`. No agent is spent on relaying
   pipeline commands.
 - **Shows the cost up front.** Planning ends with a count of the agents each
-  stage will start, by role, model and thinking effort, and a check of the module
-  count against the project's size.
+  stage will start, by role, model and thinking effort, a check of the task
+  count against the project's size, and the share of glue in the plan.
 - **Wraps up.** `finish` summarizes the run branch, drafts a PR description,
   and merges or opens a PR when you say so; `clean` removes leftover worktrees
   and merged run branches.
@@ -171,9 +188,9 @@ Roles:
 | Role | Who | Can write? |
 | --- | --- | --- |
 | Main Architect | your own session, during `plan` and `rework` | yes, docs, stubs, prompts and manifests |
-| `module-implementer` | one workflow agent per module | only its module's allowed files |
-| `module-reviewer` | one per module | no; it runs the pipeline's merge command, then reviews read-only |
-| `integrator` | one agent in the integration stage | only `integration.allowed_files` |
+| `module-implementer` | one workflow agent per task, glue tasks included | only its task's allowed files |
+| `module-reviewer` | one per task | no; it runs the pipeline's merge command, then reviews read-only |
+| `integrator` | one agent in the integration stage, for the entry point | only `integration.allowed_files` |
 | `system-reviewer` | one per integration | no; it runs the glue merge and diagnostics, then reviews read-only |
 | `patcher` | one per patch run (small rework) | only `patch.allowed_files` |
 
@@ -233,28 +250,30 @@ The architect reads the spec and the project, then writes:
 
 - `docs/architecture.md`, `docs/module_layout.md`, `docs/module_contracts.md`,
   `docs/conventions.md`
-- stub files in every module folder, containing the public API with no logic
-- `work/prompts/<module>.md` for each module, plus `integration.md` if the
-  project needs glue code
+- stub files for every system and glue module, containing the public API
+  with no logic
+- `work/prompts/<task>.md` for each task, plus `integration.md` for the
+  entry point
 - `tasks/task_manifest.yaml`
 
-It validates the manifest and shows you a table of modules and waves, for
+It validates the manifest and shows you a table of tasks and waves, for
 example:
 
-| Module | Owns | Depends on | Wave |
-| --- | --- | --- | --- |
-| shared | `src/shared/`, `tests/support/` | | 1 |
-| player | `src/player/` | shared | 2 |
-| enemy | `src/enemy/` | shared | 2 |
-| hud | `src/hud/` | shared, player | 3 |
+| Task | Owns | Systems or glue modules | Depends on | Wave |
+| --- | --- | --- | --- | --- |
+| shared | `src/shared/`, `tests/support/` | data, clock | | 1 |
+| actors | `src/sim/actors/` | player, enemies, spawner | shared | 2 |
+| view | `src/view/` | hud, world-view | shared | 2 |
+| battle (glue) | `src/game/battle/` | enemy-manager, hud-binder | shared, actors, view | 3 |
 
-It also checks the module count against the estimated size ("about 3,000
-lines: 2-4 modules recommended, 3 planned") and tells you what the run will
+It also checks the task count against the estimated size ("about 3,000
+lines: 2-4 tasks recommended, 3 planned"), states the division ("7 systems,
+3 glue modules, about 25% glue") and tells you what the run will
 cost in agents, for example "`run`: 4 implementers (sonnet, high),
 4 reviewers (opus, high); `integrate`: integrator (sonnet, high), system
 reviewer (opus, high)". You
 can change the thinking effort of any role here, for example "reviewers on
-xhigh, system reviewer on max", switch the preset, or give one hard module
+xhigh, system reviewer on max", switch the preset, or give one hard task
 `xhigh`.
 
 If the plan looks right, say yes. It then commits the planning output on the new
@@ -266,8 +285,8 @@ branch `multiagent-runs/run-001`.
 /module-pipeline:run
 ```
 
-`shared` is built first. Then `player` and `enemy` are built in parallel, and
-`hud` starts once `player` is merged, from a branch that already contains it. Watch progress with `/workflows`.
+`shared` is built first. Then `actors` and `view` are built in parallel, and
+the glue task `battle` starts once both are merged, from a branch that already contains them. Watch progress with `/workflows`.
 At the end you get a table of modules with their status and an overall gate
 status. While it runs you can `git switch main` and keep working; the run does
 not need the main checkout.
@@ -315,26 +334,38 @@ At any point, `/module-pipeline:status` shows where every run stands.
 Your session becomes the Main Architect. The run id defaults to `run-001`, or to
 the next free `run-NNN`.
 
-- Estimates the project's source lines and picks the module count from that
-  (for example 2-4 modules for 2,000-6,000 lines, about 700-2,000 lines each): every module is a full agent
-  session plus a review, so many tiny modules waste tokens.
-- Designs the shared layer: helpers, constants, theme values and test fixtures
-  that more than one module needs. One module builds it first; the others
+- Divides the code by what it does, before looking at its size: the data
+  layer first (every tuning value and text in one place), then systems (one
+  function each, in its own folder, written as if for reuse elsewhere, never
+  referencing another system; two that cannot be separated become one), then
+  glue modules by function (never one manager for everything; in an engine
+  project, connections made in the editor count as glue). Logic and
+  presentation are two halves; presentation only reads.
+- Estimates the project's source lines and takes the number of tasks from
+  that (for example 2-4 tasks for 2,000-6,000 lines, about 700-2,000 lines
+  each): every task is a full agent session plus a review. A task holds as
+  many neighboring systems as fit; systems are never merged to save an agent.
+- Designs the shared layer: the data layer, helpers and test fixtures
+  that more than one system needs. One task builds it first; the others
   depend on it.
 - Writes `docs/cross_module_rules.md` under five required headings: **Time**
   (who advances it, a representation that cannot drift, how thresholds and
   cooldowns are computed), **State** (a table: owner, lifetime, writer and
   what resets each piece), **Numbers** (units, rounding, the one home of each
-  shared formula), **Order** (the order of work in a step, when readers see
-  it) and **Errors**. Each rule names the shared-layer export that carries it
+  shared formula, where each kind of data lives), **Order** (the order of
+  work in a step, the one glue module that calls the systems in that order,
+  when readers see it) and **Errors**. Each rule names the shared-layer export that carries it
   out, what modules must not do instead, and an exact-number check: a test in
   the shared layer and one end-to-end line in `integration.acceptance`.
   Rules the spec does not settle are the architect's decisions, and you see
   them listed before anything is committed.
-- Splits the rest of the spec into modules. Each module is one cohesive feature
-  that one agent can finish in one session, and each owns one folder. Data is kept apart
-  from code, and simulation apart from presentation. There is no universal
-  "manager" module; composing modules is the integration stage's job.
+- Forms the tasks. A task that is not glue depends only on the shared
+  layer, so all of them run in parallel; a glue task names the tasks it
+  joins and runs after them. The integration stage keeps only the entry
+  point, or, in a small plan without a glue task, the glue modules as well
+  (listed under `integration.systems`). A system is something you would
+  take to another project on its own: steps that are only ever used
+  together are one system.
 - Writes the architecture, layout and contract docs. The contracts (public API,
   signals and events, inputs and outputs, forbidden dependencies) are what
   implementers and reviewers are held to.
@@ -343,12 +374,13 @@ the next free `run-NNN`.
   read this instead.
 - Copies the spec into `docs/spec.md` if it lives outside the repo. Agents only
   see committed files.
-- Scaffolds stubs, writes one self-contained prompt per module (with the
+- Scaffolds stubs, writes one self-contained prompt per task (with the
   contract sections named in it), and writes the manifest.
 - Fills in the build and test commands, the files the engine generates, and
   an effort preset.
 - Validates the manifest and fixes it until it passes.
-- Shows the module table, the waves, and how many agents `run` and `integrate`
+- Shows the task table with each task's systems, the waves, the share of
+  glue, and how many agents `run` and `integrate`
   will start, by role, model and thinking effort, and offers to change any
   role's effort.
 - **Asks before committing.** With your yes, it switches to
@@ -505,7 +537,7 @@ version: 1
 project:
   name: Card Game
   spec: docs/spec.md
-  estimated_lines: 4000             # expected source lines; validate checks the module count against it
+  estimated_lines: 4000             # expected source lines; validate checks the task count against it
 run:
   id: run-001                       # becomes branch multiagent-runs/run-001
   goal: Playable single-level prototype
@@ -515,8 +547,8 @@ effort:                             # thinking effort per role: low | medium | h
   module_reviewer: high
   integrator: high
   system_reviewer: high
-shared_layer:                       # required with two or more modules
-  task: shared                      # built first; every other module depends on it
+shared_layer:                       # required with two or more tasks
+  task: shared                      # built first; every other task depends on it
   rules: docs/cross_module_rules.md # time, state, numbers, order, errors
 diagnostics:
   compile_command: ["npm", "run", "build"]   # argv list or shell string; null if none
@@ -528,48 +560,70 @@ generated_files:                    # engine/tool output: dropped, not rejected,
   - .godot/
 tasks:
   - id: shared
-    feature: Shared helpers, constants, theme values and test fixtures
+    feature: Game data, the clock, shared helpers and test fixtures
     owned_folder: src/shared/
-    support_folder: tests/support/   # fixtures other modules' tests import
+    systems:                         # what the task builds, one function each
+      - { id: data, path: src/shared/data/ }     # the data layer
+      - { id: clock, path: src/shared/clock.js }
+    estimated_lines: 600
+    support_folder: tests/support/   # fixtures other tasks' tests import
     prompt_file: work/prompts/shared.md
-  - id: player
-    feature: Player movement and health
-    owned_folder: src/player/        # required: the one folder this module owns
-    test_folder: tests/player/       # optional, also owned exclusively
-    prompt_file: work/prompts/player.md
-    depends_on: []
+  - id: actors
+    feature: The player, the enemies and the spawner
+    owned_folder: src/sim/actors/    # required: the one folder this task owns
+    systems:                         # inside owned_folder; they never reference each other
+      - { id: player, path: src/sim/actors/player/ }
+      - { id: enemies, path: src/sim/actors/enemies/ }
+    estimated_lines: 1500            # this task's share of project.estimated_lines
+    test_folder: tests/sim/actors/   # optional, also owned exclusively
+    prompt_file: work/prompts/actors.md
     acceptance:
       - Taking damage lowers health and emits health_changed(old, new)
       - Health never drops below 0; reaching 0 emits died once
-  - id: hud
-    feature: Health bar and score display
-    owned_folder: src/hud/
-    prompt_file: work/prompts/hud.md
-    depends_on: [player]             # starts after player is merged
-    effort: medium                   # this module's implementer only
-integration:
+  - id: view
+    feature: HUD and world rendering
+    owned_folder: src/view/
+    systems:
+      - { id: hud, path: src/view/hud/ }
+    estimated_lines: 900
+    prompt_file: work/prompts/view.md
+    effort: medium                   # this task's implementer only
+  - id: battle
+    feature: Connects the actors and the view
+    glue: true                       # a glue task: its systems are glue modules
+    depends_on: [actors, view]       # the tasks it joins; it starts once they are merged
+    owned_folder: src/game/battle/
+    systems:                         # glue by function, never one manager for everything
+      - { id: enemy-manager, path: src/game/battle/enemy_manager.js }
+      - { id: hud-binder, path: src/game/battle/hud_binder.js }
+    estimated_lines: 700
+    prompt_file: work/prompts/battle.md
+integration:                         # the last layer of glue: the entry point
   prompt_file: work/prompts/integration.md
   allowed_files:
-    - src/game/                      # glue only, never inside a module folder
+    - src/main/                      # never inside a task's folder
   acceptance:
     - The game starts, spawns the player and enemies, and the HUD tracks health
+  estimated_lines: 300
 ```
 
 Rules the validator enforces:
 
 - One folder, one owner. `src/player/` and `src/player/ai/` clash;
   `src/player/` and `src/players/` do not. Test and support folders count too.
-- With two or more modules, `shared_layer` names the module that builds it
+- A task's `systems` each have an `id` and a `path` inside its
+  `owned_folder`, and do not overlap. A task without `systems` is one system.
+- With two or more tasks, `shared_layer` names the task that builds it
   (`task`, which may not have `depends_on`) or folders that already hold it
   (`existing`, which must exist; rework runs use this). Only the shared-layer
-  module may have a `support_folder`.
-- With two or more modules, `shared_layer.rules` names the cross-module rules
+  task may have a `support_folder`.
+- With two or more tasks, `shared_layer.rules` names the cross-module rules
   file. It must exist and have the headings `Time`, `State`, `Numbers`,
   `Order` and `Errors`, each with text under it (a topic that does not apply
   says so).
-- No task, including integration, may list a path inside another module's
+- No task, including integration, may list a path inside another task's
   folders.
-- `depends_on` must name existing modules and must not form a cycle.
+- `depends_on` must name existing tasks and must not form a cycle.
 - Every `prompt_file` must exist.
 - Globs are rejected. To grant a whole folder, give its path ending in `/`.
 - `generated_files` entries are a file-name pattern without `/` (only `*` as a
@@ -577,17 +631,24 @@ Rules the validator enforces:
 - Effort levels are `low`, `medium`, `high`, `xhigh` or `max`, and `effort:`
   accepts only the four role names shown. `model` fields are rejected.
 
-Validate also warns, without failing, when the module count (not counting the
-shared layer) does not fit `project.estimated_lines`:
+Validate also warns, without failing, in two cases. A task that is not glue
+depends on another task (other than the shared layer): systems must not
+reference each other, so connect the two in a glue task or make them one
+system. And the task count (not counting the shared layer) does not fit
+`project.estimated_lines`:
 
-| Estimated source lines | Modules |
+| Estimated source lines | Tasks |
 | --- | --- |
 | under 2,000 | 1-2 (one session is cheaper than the pipeline at this size) |
 | 2,000-6,000 | 2-4 |
 | 6,000-15,000 | 4-10 |
 | 15,000 and more | 8-20 |
 
-A module can always write its owned folder, its test folder,
+Validate also reports the division as `architecture`: the number of systems
+and glue modules, and the share of glue in the estimated lines. The share is
+reported, not checked.
+
+A task can always write its owned folder, its test folder,
 `work/modules/<id>/module_report.md` and `work/modules/<id>/interface_request.md`.
 `allowed_files` only adds to that list, and is rarely needed.
 
@@ -884,23 +945,30 @@ What to expect in either setup:
 
 - **Specs decide quality.** Concrete rules and acceptance criteria give
   reviewers something to check against. Vague specs produce vague modules.
-- **Size modules to the project.** Give `project.estimated_lines` an honest
-  estimate and follow the recommended module count. Many tiny modules pay the
-  per-agent start-up and review cost again and again; a module that holds a
-  whole subsystem overloads one agent.
-- **Put shared things in the shared layer.** Anything two modules need (a
-  tolerance, a color, a test builder) belongs there, or each agent writes its
-  own copy.
+- **Divide by function, then count agents by size.** How the code splits
+  into systems and glue modules comes from what each part does. Give
+  `project.estimated_lines` an honest estimate and follow the recommended
+  task count: many tiny tasks pay the per-agent start-up and review cost
+  again and again, and a task that holds a whole subsystem overloads one
+  agent. Too many tasks is fixed by giving neighboring systems to one agent,
+  not by merging systems.
+- **Keep systems apart.** A system that calls another system is the start of
+  the tangle. Connect them in a glue module, or accept that they are one
+  system.
+- **Put shared things in the shared layer.** Anything two systems need (a
+  tuning value, a tolerance, a color, a test builder) belongs there, or each
+  agent writes its own copy.
 - **Read the cross-module rules before you commit the plan.** They decide how
   time is counted and where state lives for the whole project. A wrong or
   missing rule shows up later as the same bug patched differently in several
   modules.
-- **Depend only on real API use.** Every `depends_on` edge adds a wave and takes
-  away parallelism.
-- **Estimate low and keep modules large.** Plans overestimate. In the
-  benchmark a plan of 3,200 lines came out at 1,700, in seven modules of
+- **Keep `depends_on` for glue.** A glue task names the tasks it joins. Any
+  other dependency adds a wave, takes away parallelism and ties two systems
+  together.
+- **Estimate low and keep tasks large.** Plans overestimate. In the
+  benchmark a plan of 3,200 lines came out at 1,700, in seven tasks of
   about 250 lines; that cost twice what one session spent on the same spec.
-  Aim for 700-2,000 source lines per module, and below about 2,000 lines in
+  Aim for 700-2,000 source lines per task, and below about 2,000 lines in
   total use a single session instead of the pipeline.
 - **Keep tests cheap to change.** The plan puts test rules into
   `docs/conventions.md`: expected numbers come from the data module, tests
@@ -914,8 +982,8 @@ What to expect in either setup:
 - **Tighten the contracts before running.** Most rework comes from vague public
   APIs. Reading `docs/module_contracts.md` before you approve the plan pays off.
 - **Spend thinking where it matters.** Start from a preset, then raise the
-  effort of the reviewers or of the hardest modules, and lower it for simple
-  data modules.
+  effort of the reviewers or of the hardest tasks, and lower it for simple
+  ones.
 - **Set a compile and a test command.** A typecheck or headless build plus the
   full test suite catch integration breakage that reviewers can miss.
 - **List generated files.** For engine projects, set `generated_files` so that
@@ -983,43 +1051,55 @@ merged are skipped.
 The planning step (`/module-pipeline:plan`) is checked with
 [`claude plugin eval`](https://code.claude.com/docs/en/plugin-evals). Each
 case gives the architect a spec in a scratch project and grades what it writes
-and what it says at hand-over. A case runs three times with the plugin and
-three times without it; a score is the weighted share of graders passed,
-averaged over the runs.
+and what it says at hand-over. A score is the weighted share of graders
+passed, averaged over three runs.
 
-Results for 0.9.3 (2026-10-03, WSL2, Claude Code 2.1.286):
+Results for 0.12.0 (2026-10-04, WSL2, Claude Code 2.1.286):
 
 | Case | What a good run does | With plugin | Without |
 | --- | --- | --- | --- |
-| A CLI tool of a few hundred lines | Plans at most 2 modules, says one session is cheaper at this size, asks before committing | 1.00 | 0.16 |
-| The game spec from the first benchmark (1,700 lines when built) | Estimates at most 3,000 lines and at most 4 modules, settles the cross-module rules, lists its own decisions, asks before committing | 0.99 | 0.14 |
+| A CLI tool of a few hundred lines | Plans at most 2 tasks and at most 6 systems, says one session is cheaper at this size, asks before committing | 0.95 | 0.16 |
+| The game spec from the first benchmark (1,700 lines when built) | Estimates at most 3,000 lines and at most 4 tasks, divides the code into systems and glue by function with no task depending on another, settles the cross-module rules, lists its own decisions and the share of glue, asks before committing | 0.99 | 0.14 |
 | A spec that leaves the language open | Asks which language and waits; writes no manifest | 1.00 | 1.00 |
 | A project folder outside git | Says so and asks before `git init` | 1.00 | 0.25 |
 | An ordinary request, no slash command | Does not start planning | 1.00 | 1.00 |
 
+What the plans looked like:
+
+- The game: 24 to 27 systems in three tasks (the shared layer, the logic, the
+  presentation), no task depending on another, and all the glue in the
+  integration stage as one file for each function, 24-29% of the estimate.
+  At this size the task count leaves no room for a separate glue task.
+- The small tool: 6 or 7 systems in one to three tasks.
+
 How to read them:
 
+- The "Without" column was measured on 0.9.3 and not run again: the plugin
+  is not loaded in that arm. Its first two numbers come from the graders
+  those cases had then, which have changed since.
 - Without the plugin the slash command does not exist, so a low score in that
   column is expected. The with-plugin column is the regression signal.
 - The language case and the ordinary request score 1.00 without the plugin
   too. They show that the plugin does no harm there, not that it helps.
-- The suite caught the problem 0.9.3 fixed. Before the fix the architect
-  sometimes stopped to ask about gaps in the spec before writing anything, and
-  the first two cases scored 0.72 and 0.38.
-- The 0.99 is one run of three that failed one grader: its pattern did not
-  recognize "Agents: 8 in total". The pattern was widened afterwards and
-  checked against the stored messages, not re-run.
-- The 0.14 without the plugin was measured before the hand-over graders of
-  that case were rewritten, and was not re-run with the new ones.
+- The 0.95 is one run of three that listed 7 systems where the grader allows
+  6. A first round on 0.12.0 had split the same tool into 8 to 10 systems,
+  one for each step of the word count; the skill now says that steps only
+  ever used together are one system, and the case was run again.
+- The 0.99 is one run whose sentence on the share of glue was longer than the
+  grader's pattern allowed. The pattern was widened afterwards and checked
+  against the stored messages, not re-run.
+- After these runs one clause was added to the skill: the integration lists
+  the glue modules it writes itself under `systems`. That was not run again.
 
 What they do not cover:
 
 - Only planning. `run`, `integrate` and `rework` start workflows with many
   agents in worktrees, which an eval run cannot host; `npm test` covers them
   with stand-in agents.
-- Not 0.10.0. That release moved the implementers and the integrator to Sonnet
-  and raised the default efforts; the suite has not been run since. Planning
-  itself still runs on Opus at `high`.
+- Whether agents build what the plan says. No run has yet measured the code
+  that comes out of a plan divided this way, and no real run has had a glue
+  task. The one real run of `run` and `integrate` since 0.10.0 was a planned
+  project with a single task (see the changelog for 0.11.0).
 
 The suite is not part of this repository yet.
 

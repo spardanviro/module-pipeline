@@ -206,6 +206,10 @@ function taskInfo(task) {
     kind: task.kind,
     feature: task.feature,
     owner: task.owner,
+    // A glue task connects the tasks in dependsOn; any other task knows only the shared layer.
+    ...(task.kind === 'module' ? { glue: task.glue, systems: task.systems } : {}),
+    // The glue modules the integration writes itself.
+    ...(task.kind === 'integration' && task.systems.length ? { systems: task.systems } : {}),
     ownedFolder: task.ownedFolder || null,
     ownedScript: task.ownedScript || null,
     testFolder: task.testFolder || null,
@@ -323,9 +327,15 @@ function cmdValidate({ positional }) {
     projectRoot: manifest.projectRoot,
     mode: manifest.patch ? 'patch' : 'modules',
     patch: manifest.patch ? taskInfo(manifest.patch) : null,
-    modules: manifest.tasks.map((task) => ({ id: task.id, owns: task.ownedFolder || task.ownedScript })),
+    modules: manifest.tasks.map((task) => ({
+      id: task.id,
+      owns: task.ownedFolder || task.ownedScript,
+      ...(task.glue ? { glue: true } : {}),
+      ...(task.systems.length ? { systems: task.systems.map((system) => system.id) } : {}),
+    })),
     sharedLayer: manifest.sharedLayer,
     sizing: manifest.sizing,
+    architecture: manifest.architecture,
     waves: planWaves(manifest.tasks).map((wave) => wave.map((task) => task.id)),
     integration: Boolean(manifest.integration),
     generatedFiles: manifest.generatedFiles,
@@ -876,10 +886,15 @@ function moduleSizes(root, state, manifest) {
   const perModule = manifest.tasks.map((task) => ({
     id: task.id,
     lines: changedLineCountBetween(root, state.baseCommit, tip, [task.ownedFolder || task.ownedScript]),
+    ...(task.glue ? { glue: true } : {}),
   }));
+  const builtLines = perModule.reduce((total, entry) => total + entry.lines, 0);
+  const glueLines = perModule.filter((entry) => entry.glue).reduce((total, entry) => total + entry.lines, 0);
   return {
     estimatedLines: manifest.project.estimatedLines,
-    builtLines: perModule.reduce((total, entry) => total + entry.lines, 0),
+    builtLines,
+    // The glue tasks' share of what was built; the integration stage's own glue comes later and is not in it.
+    ...(glueLines ? { gluePercent: Math.round((glueLines / builtLines) * 100) } : {}),
     perModule,
   };
 }

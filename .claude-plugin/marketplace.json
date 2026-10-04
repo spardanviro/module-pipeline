@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "module-pipeline",
-      "description": "Spec-driven multi-agent pipeline with folder ownership, enforced write scopes, per-run branches, and review gates.",
+      "description": "Spec-driven multi-agent pipeline for game development: reusable systems and glue by function, folder ownership, enforced write scopes, per-run branches, and review gates.",
       "source": "./plugins/module-pipeline",
       "category": "development"
     }

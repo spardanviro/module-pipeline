@@ -9,12 +9,15 @@
 //                                                # (one module may give rules alone)
 //   diagnostics: { compile_command?, test_command?: string | string[], timeout_ms? }
 //   generated_files: ["*.uid", ".godot/"]   # tool output dropped (not rejected) when outside a task's scope
-//   tasks:            # module tasks, one owned folder each
+//   tasks:            # one agent each, one owned folder each
 //     - id, feature, owner?, owned_folder (or legacy owned_script),
+//       systems?: [{ id, path }],   # what the task builds, one function each, inside owned_folder
+//       glue?: true,                # a glue task: its systems connect the tasks in depends_on
+//       estimated_lines?,
 //       test_folder? | test_file?, support_folder? (shared-layer task only), prompt_file, module_report?,
 //       interface_request?, allowed_files?, depends_on?, acceptance?, effort?
-//   integration:      # optional glue stage
-//     { id?, prompt_file, allowed_files, integration_report?, interface_request?, acceptance?, effort? }
+//   integration:      # optional last layer of glue: the entry point
+//     { id?, prompt_file, allowed_files, systems?, integration_report?, interface_request?, acceptance?, effort?, estimated_lines? }
 //   patch:            # instead of tasks + integration: a small rework done by one agent
 //     { prompt_file, allowed_files, acceptance?, max_changed_lines?, patch_report?, interface_request?, effort? }
 //
@@ -23,7 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import yaml from '../vendor/js-yaml.mjs';
 import { canonicalPath } from './paths.mjs';
-import { entriesOverlap, normalizeGeneratedPattern, normalizeRelPath, normalizeScopeEntry } from './scope.mjs';
+import { entriesOverlap, entryCovers, normalizeGeneratedPattern, normalizeRelPath, normalizeScopeEntry } from './scope.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const INTEGRATION_ID = 'integration';
@@ -73,12 +76,13 @@ export const PRESETS = {
   quality: allRoles('xhigh'),
 };
 
-// How many modules (not counting the shared layer) suit a project of a given
-// size: about 700-2,000 source lines each. A module costs an implementer and a
-// reviewer session, and usually a share of a rework round; in the first
-// benchmark seven modules of about 250 lines each cost twice what one session
-// spent on the whole project. Every extra module is also one more seam. Too
-// few modules make one agent hold a whole subsystem.
+// How many tasks (not counting the shared layer) suit a project of a given
+// size: about 700-2,000 source lines each. Size decides how many agents work,
+// never how the code is divided: a task holds as many systems as fit. A task
+// costs an implementer and a reviewer session, and usually a share of a rework
+// round; in the first benchmark seven tasks of about 250 lines each cost twice
+// what one session spent on the whole project. Too few tasks make one agent
+// hold a whole subsystem.
 export const SIZE_BANDS = [
   { below: 2000, modules: [1, 2] },
   { below: 6000, modules: [2, 4] },
@@ -189,6 +193,17 @@ function acceptanceList(value, fieldName) {
   });
 }
 
+function optionalLines(value, fieldName) {
+  if (value == null) {
+    return null;
+  }
+  const lines = Number(value);
+  if (!(Number.isInteger(lines) && lines > 0)) {
+    throw new Error(`${fieldName} must be a positive whole number: ${JSON.stringify(value)}`);
+  }
+  return lines;
+}
+
 function resolveProjectRoot(rawRoot, manifestPath) {
   // Default layout: <root>/tasks/<manifest>.yaml
   return canonicalPath(path.resolve(path.dirname(manifestPath), rawRoot ? String(rawRoot) : '..'));
@@ -201,6 +216,51 @@ function uniqueScopes(entries, fieldName) {
     seen.set(normalized.toLowerCase(), normalized);
   }
   return [...seen.values()];
+}
+
+/**
+ * The systems a task builds. A system does one thing, lives in its own folder
+ * or file inside the task's folder, and knows no other system: glue connects
+ * them. A task that lists none is one system, its whole folder. The
+ * integration lists the glue modules it writes itself the same way, inside
+ * its allowed files.
+ * @param {string[]} scopes where the systems may live: the task's folder, or the integration's allowed files
+ */
+function normalizeSystems(raw, taskId, scopes) {
+  if (raw == null) {
+    return [];
+  }
+  if (!Array.isArray(raw) || !raw.length) {
+    throw new Error(`${taskId}.systems must be a list of { id, path } entries.`);
+  }
+  if (!scopes.length) {
+    throw new Error(`${taskId}.systems needs ${taskId}.owned_folder: every system lives inside it.`);
+  }
+  const systems = raw.map((entry, index) => {
+    const field = `${taskId}.systems[${index}]`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`${field} must be a mapping with id and path.`);
+    }
+    const id = safeId(entry.id, `${field}.id`);
+    const systemPath = normalizeScopeEntry(entry.path, `${field}.path`);
+    if (!scopes.some((scope) => entryCovers(scope, systemPath))) {
+      throw new Error(`${field}.path ${systemPath} is outside ${scopes.join(', ')}: a task's systems live inside the folder it owns.`);
+    }
+    return { id, path: systemPath };
+  });
+  for (let i = 0; i < systems.length; i += 1) {
+    for (let j = i + 1; j < systems.length; j += 1) {
+      if (systems[i].id === systems[j].id) {
+        throw new Error(`${taskId}.systems lists ${systems[i].id} twice.`);
+      }
+      if (entriesOverlap(systems[i].path, systems[j].path)) {
+        throw new Error(
+          `${taskId}.systems: ${systems[i].id} (${systems[i].path}) and ${systems[j].id} (${systems[j].path}) overlap. Each system has its own folder or file.`,
+        );
+      }
+    }
+  }
+  return systems;
 }
 
 function normalizeModuleTask(raw, index, efforts) {
@@ -226,9 +286,16 @@ function normalizeModuleTask(raw, index, efforts) {
   const interfaceRequest =
     optionalPath(raw.interface_request, `${id}.interface_request`) || `work/modules/${id}/interface_request.md`;
 
+  if (raw.glue != null && typeof raw.glue !== 'boolean') {
+    throw new Error(`${id}.glue must be true or false: ${JSON.stringify(raw.glue)}`);
+  }
+
   return {
     id,
     kind: 'module',
+    glue: raw.glue === true,
+    systems: normalizeSystems(raw.systems, id, ownedFolder ? [ownedFolder] : []),
+    estimatedLines: optionalLines(raw.estimated_lines, `${id}.estimated_lines`),
     feature: String(raw.feature || id),
     owner: String(raw.owner || `${id}-agent`),
     ownedFolder,
@@ -272,6 +339,9 @@ function normalizeIntegration(raw, runId, efforts) {
     interfaceRequest,
     allowedFiles: uniqueScopes([report, interfaceRequest, ...extra], 'integration.allowed_files entry'),
     acceptance: acceptanceList(raw.acceptance, 'integration.acceptance'),
+    // The glue modules the integration writes itself, in a plan without a glue task.
+    systems: normalizeSystems(raw.systems, INTEGRATION_ID, uniqueScopes(extra, 'integration.allowed_files entry')),
+    estimatedLines: optionalLines(raw.estimated_lines, 'integration.estimated_lines'),
     effort: raw.effort != null ? effortLevel(raw.effort, 'integration.effort') : efforts.integrator,
   };
 }
@@ -420,9 +490,48 @@ function rejectSupportFolder(task) {
 }
 
 /**
- * Checks the module count against the project's estimated size.
+ * Modules must not know each other: what connects two of them is glue, and two
+ * that cannot be separated are one system. A task that is not glue may
+ * therefore depend only on the shared layer.
+ */
+function independenceWarnings(tasks, sharedLayer) {
+  return tasks
+    .filter((task) => !task.glue && task.id !== sharedLayer?.taskId)
+    .flatMap((task) =>
+      task.dependsOn
+        .filter((dependency) => dependency !== sharedLayer?.taskId)
+        .map(
+          (dependency) =>
+            `${task.id} depends on ${dependency}: modules must not reference each other. Connect them in a glue task ` +
+            '(glue: true) that depends on both, or make them one system if they cannot be separated.',
+        ),
+    );
+}
+
+/**
+ * How the plan is divided: systems (the reusable part) and glue. The glue
+ * share is known only when every task carries an estimate.
+ */
+function describeArchitecture(tasks, integration) {
+  const count = (list) => list.reduce((total, task) => total + Math.max(task.systems.length, 1), 0);
+  const glueTasks = tasks.filter((task) => task.glue);
+  const moduleTasks = tasks.filter((task) => !task.glue);
+  const parts = [...tasks, integration].filter(Boolean);
+  const glueParts = [...glueTasks, integration].filter(Boolean);
+  const lines = (list) => list.reduce((total, part) => total + part.estimatedLines, 0);
+  return {
+    moduleTasks: moduleTasks.length,
+    systems: count(moduleTasks),
+    glueTasks: glueTasks.length,
+    glueModules: count(glueTasks) + (integration ? Math.max(integration.systems.length, 1) : 0),
+    gluePercent: parts.every((part) => part.estimatedLines) ? Math.round((lines(glueParts) / lines(parts)) * 100) : null,
+  };
+}
+
+/**
+ * Checks the task count against the project's estimated size.
  * @param {number|null} estimatedLines source lines the finished project should have, tests excluded
- * @param {number} moduleCount modules, not counting the one that builds the shared layer
+ * @param {number} moduleCount tasks, not counting the one that builds the shared layer
  */
 export function sizeModules(estimatedLines, moduleCount) {
   if (!estimatedLines) {
@@ -438,13 +547,13 @@ export function sizeModules(estimatedLines, moduleCount) {
   const warnings = [];
   if (moduleCount > max) {
     warnings.push(
-      `${moduleCount} modules for about ${estimatedLines} lines is too fine (about ${sizing.linesPerModule} lines each): every module costs an ` +
-        `implementer and a reviewer session and adds a seam. Merge them into ${min}-${max} modules.`,
+      `${moduleCount} tasks for about ${estimatedLines} lines is too many agents (about ${sizing.linesPerModule} lines each): every task costs an ` +
+        `implementer and a reviewer session. Keep the systems as they are and give neighboring ones to the same task: ${min}-${max} tasks.`,
     );
   } else if (moduleCount < min) {
     warnings.push(
-      `${moduleCount} modules for about ${estimatedLines} lines is too coarse: one agent would hold a whole subsystem. ` +
-        `Split them into ${min}-${max} modules.`,
+      `${moduleCount} tasks for about ${estimatedLines} lines is too few agents: one agent would hold a whole subsystem. ` +
+        `Spread the systems over ${min}-${max} tasks.`,
     );
   }
   if (estimatedLines < SIZE_BANDS[0].below) {
@@ -531,6 +640,7 @@ export function validateManifest(raw, manifestPath) {
       generatedFiles: normalizeGenerated(raw),
       sharedLayer: existing.length || rules ? { taskId: null, paths: existing, rules } : null,
       sizing: null,
+      architecture: null,
       warnings: effortWarnings,
       tasks: [],
       integration: null,
@@ -570,7 +680,8 @@ export function validateManifest(raw, manifestPath) {
     generatedFiles: normalizeGenerated(raw),
     sharedLayer,
     sizing,
-    warnings: [...effortWarnings, ...sizeWarnings],
+    architecture: describeArchitecture(tasks, integration),
+    warnings: [...effortWarnings, ...sizeWarnings, ...independenceWarnings(tasks, sharedLayer)],
     tasks,
     integration,
     patch: null,

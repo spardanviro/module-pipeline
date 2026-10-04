@@ -53,7 +53,9 @@ error, and interface request, choose one:
   folder.
 - **create_new_task**: a new module with its own new folder (scaffold it).
 - **contract_change**: update docs/module_contracts.md, then rework every
-  module the change touches.
+  module the change touches. A system that reaches into another system is
+  one: move the connection into a glue module (rework the glue task and
+  the system), or make the two one system if they cannot be separated.
 - **defer**: safe to leave for now; say why. The decisions file is what
   lets the next system review mark the feature `deferred` instead of
   blocking on it, so name the feature there as the spec names it.
@@ -127,8 +129,9 @@ On the **module** path, write:
   `run.id: <next-run-id>`, the same project, effort and diagnostics settings
   (but no `project.estimated_lines`: module sizing is for a full build), only
   the modules that need work, and the integration section if integration must
-  run again. Rework tasks keep the original id, owned folder, test folder and
-  support folder. With two or more rework tasks, set `shared_layer.existing`
+  run again. Rework tasks keep the original id, owned folder, `systems`,
+  `glue`, test folder and support folder; `depends_on` names only tasks
+  that are in this manifest. With two or more rework tasks, set `shared_layer.existing`
   to the shared layer's folders on the run branch; if the shared-layer module
   itself is reworked, name it in `shared_layer.task` instead, so it runs
   first. Keep `shared_layer.rules`; validate requires it with two or more

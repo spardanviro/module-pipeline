@@ -3,22 +3,26 @@
 The full guide (walkthrough, manifest reference, statuses, troubleshooting) is
 in the [repository README](../../README.md).
 
-A Claude Code plugin that runs a spec-driven, multi-agent build:
+A Claude Code plugin for game development that runs a spec-driven,
+multi-agent build:
 
 1. **`/module-pipeline:plan <spec> [run-id]`**: the current session acts as the
-   Main Architect. It sizes the project, designs a shared layer and splits the
-   rest of the spec into modules that each own one folder, writes contracts,
-   project conventions, scaffolds, per-module prompts and
+   Main Architect. It divides the code by what it does: a data layer,
+   systems that each do one thing and never reference each other, and glue
+   modules by function that connect them. The project's size decides only
+   how many tasks (agents) build them. It writes contracts, project
+   conventions, scaffolds, one prompt per task and
    `tasks/task_manifest.yaml`, validates it, shows how many agents the run will
    start, and (with your yes) commits it on branch `multiagent-runs/<run-id>`.
-2. **`/module-pipeline:run [manifest]`**: a workflow implements every pending
-   module in parallel, one agent per module in an isolated worktree, in
-   dependency waves. Each module's reviewer audits it against its scope,
+2. **`/module-pipeline:run [manifest]`**: a workflow builds every pending
+   task in parallel, one agent per task in an isolated worktree: the shared
+   layer first, then every task of systems at once, then the glue tasks that
+   join them. Each task's reviewer audits it against its scope,
    commits it on the run branch and reviews it read-only; then the build and
    test commands run on the run branch. When that passes, it goes straight on
    to the integration (`--modules-only` stops before it).
 3. **`/module-pipeline:integrate [manifest]`**: an integration agent writes the
-   glue code; the system reviewer commits it, runs diagnostics and checks the
+   entry point, the last layer of glue; the system reviewer commits it, runs diagnostics and checks the
    whole result against the spec. `run` starts this by itself; the command is
    for the cases where it did not.
 4. **`/module-pipeline:rework <run-id>`**: the Main Architect decides every

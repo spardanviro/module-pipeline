@@ -32,7 +32,11 @@ interface request paths, acceptance criteria.
 - When a module lacks what integration needs, do not patch around it. Write
   the missing API into your interface request file, name the module that
   should provide it, and leave a clear seam.
-- Keep glue small and explicit; no universal manager objects.
+- You write the last layer of glue: the entry point and the one place that
+  calls the systems, or the glue modules other tasks built, in the order
+  the rules give. When your task lists glue modules of your own (`systems`
+  in the claim output), write one file for each. Never one manager that
+  glues everything.
 - Run the project's build and tests and report honestly what ran.
 
 ## Before you finish

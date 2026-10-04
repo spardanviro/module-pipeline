@@ -3,6 +3,74 @@
 All notable changes to the module-pipeline plugin. Versions follow
 `plugins/module-pipeline/.claude-plugin/plugin.json`.
 
+## 0.12.0 - 2026-10-04
+
+The plugin is now described as what it is: a tool for game development
+(plugin and marketplace descriptions, the READMEs, the plan command).
+
+The plan now divides the code the way the architecture the plugin was
+modelled on does: reusable systems, glue between them, data apart from code.
+Before, the number of modules came from the project's size, modules could
+use each other directly, and all glue was one integration task.
+
+Changed:
+
+- **Function decides the division, size decides the agents.** The architect
+  first divides the code by what it does, then takes the number of *tasks*
+  (one agent each) from the estimated size and gives each task the systems
+  that belong together. Systems are never merged to save an agent. The size
+  bands are unchanged and now count tasks.
+- **Systems.** A system does one thing, lives in its own folder or file, is
+  written as if for reuse in another project, and never references another
+  system. Two that cannot be separated become one. A task lists its systems
+  under `systems` (`id` and `path`, inside its `owned_folder`).
+- **Glue by function.** Glue is split into small glue modules instead of one
+  manager for everything. A task with `glue: true` holds glue modules, names
+  the tasks it joins in `depends_on` and runs once they are merged. The
+  integration stage keeps the entry point; in a small plan without a glue
+  task it writes the glue modules itself, one file for each function. In an
+  engine project, connections made in the editor count as glue.
+- **Modules do not depend on each other.** A task that is not glue depends
+  only on the shared layer, so all such tasks run in one wave. Validate
+  warns when one depends on another; old manifests keep working.
+- **Data first.** The data layer (tuning values, texts, ids) is designed
+  before the systems and kept in one place, with presentation data apart
+  from gameplay data. Implementers read values from it, and reviewers flag
+  values written into code.
+- **Logic and presentation are two halves**, each with its own systems, glue
+  and data. Presentation reads the logic's state through a read-only API.
+- **One owner of the order.** The cross-module rules name the one glue
+  module that calls the systems in the order of a step; logic is not
+  sequenced by events.
+- Reviewers block a system that reaches into another system. The system
+  reviewer also looks for one glue module that glues everything and for
+  logic that sits in glue.
+
+Added:
+
+- Manifest: `systems` and `glue` on tasks, `estimated_lines` on tasks and on
+  the integration.
+- `validate` reports `architecture`: the number of systems and glue modules
+  and `gluePercent`, the share of glue in the estimate. The module stage's
+  report shows the share actually built. The share is reported, not checked.
+- The claim output tells an agent its systems and whether its task is glue.
+- `integration.systems`: the glue modules the integration writes itself, in
+  a plan without a glue task. They count as glue modules in `architecture`.
+
+Checked with `claude plugin eval` (WSL2, three runs with the plugin for each
+case): the game spec 0.99, the small tool 0.95, the other three cases 1.00.
+The game plans had 24 to 27 systems in three tasks, no task depending on
+another, and the glue in the integration stage by function, 24-29% of the
+estimate. A first round had split the small tool into 8 to 10 systems, one
+for each step of the word count; the skill now says that steps only ever
+used together are one system, and the next round gave 6 or 7. The README has
+the table and what the numbers leave out. `integration.systems` was added
+after the last eval run.
+
+Not measured: the code agents build from such a plan. No real run has had a
+glue task yet. Each agent definition grew by about 300 characters; the test
+that keeps them short now allows 3,400 instead of 3,000.
+
 ## 0.11.0 - 2026-10-03
 
 Changed:

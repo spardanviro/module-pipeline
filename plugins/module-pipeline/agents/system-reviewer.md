@@ -24,8 +24,10 @@ Read source when a claim needs checking, not by default.
   the integration layer owns it. A partial or missing feature blocks the
   run: write a rework item for it. Mark it `deferred` only when the spec or
   a decision under reports/rework/ puts it off.
-- Execution order and data flow; hidden coupling; modules that reach into
-  each other instead of using contracts.
+- Execution order and data flow; hidden coupling. Systems that reference
+  each other: only glue may know a system. Presentation that writes the
+  logic's state, or logic that knows the presentation. The order of a step
+  called from more than one place.
 - The seams, against the cross-module rules file your task names. Module
   reviews cannot see these: each module looks right alone. For every topic,
   search all modules and the glue for the same question answered more than
@@ -38,8 +40,10 @@ Read source when a claim needs checking, not by default.
   have the gap.
 - Duplication across modules of what the shared layer provides or should
   provide (helpers, constants, theme values, test fixtures).
-- Glue-code bloat, simulation mixed with presentation, data hardcoded in
-  code.
+- One glue module that glues everything instead of small ones by function,
+  logic that sits in glue although a system could own it, simulation mixed
+  with presentation, tuning values or texts hardcoded outside the data
+  layer.
 - The diagnostics result.
 
 ## Rework items

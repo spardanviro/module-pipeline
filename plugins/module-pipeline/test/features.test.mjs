@@ -51,7 +51,8 @@ test('manifest: every role gets an effort from the preset unless set, and models
   }, 'the agents that write modules and glue run on sonnet, the others on opus');
   assert.equal(plain.preset, 'balanced');
   assert.deepEqual(plain.efforts, { moduleImplementer: 'high', moduleReviewer: 'high', integrator: 'high', systemReviewer: 'high' });
-  assert.deepEqual(plain.warnings, []);
+  assert.equal(plain.warnings.length, 1, 'only the warning about hud using player directly');
+  assert.match(plain.warnings[0], /^hud depends on player: modules must not reference each other/);
   assert.equal(parse(withEffort('  preset: economy')).efforts.systemReviewer, 'medium');
 
   const quality = parse(withEffort('  preset: quality\n  module_reviewer: low'));
@@ -66,9 +67,7 @@ test('manifest: every role gets an effort from the preset unless set, and models
   assert.throws(() => parse(withEffort('  preset: cheap')), /effort\.preset must be one of economy, balanced, quality/);
   assert.throws(() => parse(withEffort('  module_reviewer: extreme')), /effort\.module_reviewer must be one of low, medium, high, xhigh, max/);
   assert.throws(() => parse(withEffort('  reviewer: high')), /effort\.reviewer is not a role/);
-  assert.deepEqual(parse(withEffort('  pipeline_ops: low')).warnings, [
-    'effort.pipeline_ops is ignored: the pipeline CLI now runs without a relay agent.',
-  ]);
+  assert.equal(parse(withEffort('  pipeline_ops: low')).warnings[0], 'effort.pipeline_ops is ignored: the pipeline CLI now runs without a relay agent.');
   assert.throws(() => parse(DEFAULT_MANIFEST.replace('    acceptance: [Player moves]', '    acceptance: [Player moves]\n    model: haiku')), /player\.model is no longer supported/);
   assert.throws(() => parse(DEFAULT_MANIFEST.replace('effort:\n  module_implementer: medium', 'defaults:\n  model: sonnet')), /defaults\.model is no longer supported/);
 

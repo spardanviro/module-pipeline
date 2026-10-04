@@ -64,9 +64,10 @@ function sizeSection(size) {
   return [
     '## Size',
     '',
-    `${size.builtLines} source line(s) changed in the module folders on this run${estimate}.`,
+    `${size.builtLines} source line(s) changed in the module folders on this run${estimate}.` +
+      (size.gluePercent != null ? ` Glue tasks wrote ${size.gluePercent}% of them.` : ''),
     '',
-    ...table(['Module', 'Source lines'], size.perModule.map((entry) => [entry.id, entry.lines])),
+    ...table(['Module', 'Source lines'], size.perModule.map((entry) => [entry.glue ? `${entry.id} (glue)` : entry.id, entry.lines])),
     '',
   ];
 }

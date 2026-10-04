@@ -1,8 +1,8 @@
 {
   "name": "multiagent-system",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
-  "description": "Marketplace repository for the module-pipeline Claude Code plugin.",
+  "description": "Marketplace repository for module-pipeline, a Claude Code plugin for game development.",
   "scripts": {
     "test": "node --test \"plugins/module-pipeline/test/*.test.mjs\""
   },

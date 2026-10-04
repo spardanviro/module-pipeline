@@ -51,6 +51,8 @@ more than one module reads. Settings, debug switches and caches are state.
   replaces.
 - Update or rebuild: say which fields an upgrade, reload or restart keeps.
 - Other modules change state only through the owner's API.
+- Presentation holds no state the logic needs: it reads the logic's state
+  through a read-only API and never writes it.
 -->
 
 ## Numbers
@@ -59,6 +61,9 @@ more than one module reads. Settings, debug switches and caches are state.
 - Units and coordinate system (pixels, seconds, radians; where the origin is).
 - Rounding: where it happens (display only?) and how (floor, round, digits).
 - Comparing fractional numbers: the one shared function, or integers instead.
+- Where each kind of data lives: tuning values, texts, ids and asset names
+  have one place each in the data layer. No module writes such a value into
+  its code; presentation data is kept apart from gameplay data.
 - The one home of every formula or derived value that more than one module
   needs, presentation included (a HUD that shows a simulation value calls the
   same function, it does not restate the formula).
@@ -68,7 +73,11 @@ more than one module reads. Settings, debug switches and caches are state.
 ## Order
 
 <!--
-- The order of work inside one step, frame or request, as a numbered list.
+- The order of work inside one step, frame or request, as a numbered list,
+  and the one glue module that calls the systems in that order (normally
+  the entry point). Nothing else decides when a system runs.
+- Logic is not sequenced by events or signals, whose order nobody controls;
+  those are for presentation.
 - When readers (rendering, snapshots, API responses) observe: before or after
   the step, and which values they see.
 - Whether an event raised during a step takes effect in the same step or the

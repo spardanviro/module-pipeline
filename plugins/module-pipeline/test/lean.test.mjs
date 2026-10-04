@@ -101,12 +101,14 @@ test('validate compares the module count with the estimated project size', () =>
 
   const fits = sized(3000);
   assert.deepEqual(fits.sizing, { estimatedLines: 3000, modules: 3, recommended: { min: 2, max: 4 }, linesPerModule: 1000 });
-  assert.deepEqual(fits.warnings, []);
+  // The default manifest lets hud use player directly, which is its own warning (see architecture.test.mjs).
+  const sizeWarnings = (manifest) => manifest.warnings.filter((warning) => !/must not reference each other/.test(warning));
+  assert.deepEqual(sizeWarnings(fits), []);
 
-  assert.match(sized(40000).warnings[0], /3 modules for about 40000 lines is too coarse.*Split them into 8-20 modules/);
-  const tiny = sized(1800).warnings;
+  assert.match(sizeWarnings(sized(40000))[0], /3 tasks for about 40000 lines is too few agents.*Spread the systems over 8-20 tasks/);
+  const tiny = sizeWarnings(sized(1800));
   assert.equal(tiny.length, 2);
-  assert.match(tiny[0], /3 modules for about 1800 lines is too fine \(about 600 lines each\).*Merge them into 1-2 modules/);
+  assert.match(tiny[0], /3 tasks for about 1800 lines is too many agents \(about 600 lines each\).*Keep the systems as they are.*1-2 tasks/);
   assert.match(tiny[1], /cheaper to build in one session.*about twice as much/);
 
   const shared = parse(SHARED_TASK_MANIFEST.replace('  spec: docs/spec.md\n', '  spec: docs/spec.md\n  estimated_lines: 3000\n'));
@@ -123,7 +125,7 @@ test('too many modules for the size is a warning, not an error', () => {
   const manifest = parse(
     `version: 1\nproject:\n  name: Tiny\n  estimated_lines: 2000\nrun:\n  id: run-001\nshared_layer:\n  existing: [src/common/]\n  rules: docs/cross_module_rules.md\ntasks:\n${many}`,
   );
-  assert.match(manifest.warnings[0], /7 modules for about 2000 lines is too fine.*Merge them into 2-4 modules/);
+  assert.match(manifest.warnings[0], /7 tasks for about 2000 lines is too many agents.*give neighboring ones to the same task: 2-4 tasks/);
 });
 
 test('an existing shared-layer folder must exist', () => {
@@ -141,7 +143,8 @@ test('pipeline agents start without CLAUDE.md files, and no relay agent exists',
     const text = fs.readFileSync(path.join(agentsDir, name), 'utf8');
     const frontmatter = yaml.load(text.match(/^---\r?\n([\s\S]*?)\r?\n---/)[1]);
     assert.equal(frontmatter.omitClaudeMd, true, `${name} omits CLAUDE.md`);
-    assert.ok(text.length < 3000, `${name} stays short (${text.length} chars)`);
+    // Every agent pays for its definition at start-up. 0.12.0's rules on systems and glue took the limit from 3000 to 3400.
+    assert.ok(text.length < 3400, `${name} stays short (${text.length} chars)`);
   }
   for (const name of ['implement-modules.js', 'integrate-system.js', 'patch-run.js']) {
     const source = fs.readFileSync(path.join(PLUGIN_ROOT, 'workflows', name), 'utf8');

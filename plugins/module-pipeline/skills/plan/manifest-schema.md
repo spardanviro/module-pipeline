@@ -7,23 +7,23 @@ version: 1
 project:
   name: Card Game
   spec: docs/spec.md              # the implementation spec, inside the repo
-  estimated_lines: 6000           # expected source lines, tests excluded; checks the module count
+  estimated_lines: 6000           # expected source lines, tests excluded; checks the task count
 run:
   id: run-001                     # letters, digits, . _ - ; becomes branch multiagent-runs/run-001
   goal: One-sentence goal of this run
 effort:                           # thinking effort per role: low | medium | high | xhigh | max
   preset: balanced                # economy | balanced | quality (default balanced); roles below override it
-  module_implementer: high        # one agent per module
-  module_reviewer: high           # one read-only reviewer per merged module
-  integrator: high                # writes the glue code
+  module_implementer: high        # one agent per task
+  module_reviewer: high           # one read-only reviewer per merged task
+  integrator: high                # writes the entry point
   system_reviewer: high           # reviews the integrated result against the spec
-shared_layer:                     # required with two or more modules
-  task: shared                    # the module that builds it; it runs first, every other module depends on it
+shared_layer:                     # required with two or more tasks
+  task: shared                    # the task that builds it; it runs first, every other task depends on it
   # existing: [src/shared/, tests/support/]   # instead of task: folders that already hold it
-  rules: docs/cross_module_rules.md   # required with two or more modules: time, state, numbers, order, errors
+  rules: docs/cross_module_rules.md   # required with two or more tasks: time, state, numbers, order, errors
 diagnostics:
   compile_command: ["dotnet", "build"]   # argv list or a shell string; null if none
-  test_command: ["dotnet", "test"]       # full test suite after modules merge; null if none
+  test_command: ["dotnet", "test"]       # full test suite after the tasks merge; null if none
   timeout_ms: 300000                     # per command
 generated_files:                  # tool output that may appear outside a task's scope
   - "*.uid"                       # file-name pattern ("*" only), matched anywhere
@@ -31,33 +31,82 @@ generated_files:                  # tool output that may appear outside a task's
   - .godot/                       # a folder
 tasks:
   - id: shared
-    feature: Shared helpers, constants, theme values and test fixtures
+    feature: Game data, the clock, shared helpers and test fixtures
     owned_folder: src/shared/
+    systems:                             # what this task builds, one function each
+      - { id: data, path: src/shared/data/ }       # the data layer: tuning values, texts, ids
+      - { id: clock, path: src/shared/clock.gd }   # a system may be a single file
+    estimated_lines: 600
     test_folder: tests/shared/
-    support_folder: tests/support/        # test fixtures other modules' tests import; shared_layer.task only
+    support_folder: tests/support/        # test fixtures other tasks' tests import; shared_layer.task only
     prompt_file: work/prompts/shared.md
-  - id: player-health             # unique; "integration" is reserved
-    feature: Player health and damage
-    owned_folder: src/player/health/     # REQUIRED: the one folder this module owns
-    test_folder: tests/player/health/    # optional; owned exclusively too
-    prompt_file: work/prompts/player-health.md
-    module_report: work/modules/player-health/module_report.md          # default shown
-    interface_request: work/modules/player-health/interface_request.md  # default shown
-    allowed_files: []             # extra files/folders outside the module, rarely needed
-    depends_on: []                # module ids whose public API this module uses
+  - id: combat                    # unique; "integration" is reserved
+    feature: Health, damage and the weapons
+    owned_folder: src/sim/combat/        # REQUIRED: the one folder this task owns
+    systems:                             # each inside owned_folder; they do not reference each other
+      - { id: health, path: src/sim/combat/health/ }
+      - { id: weapons, path: src/sim/combat/weapons/ }
+    estimated_lines: 1400         # this task's share of project.estimated_lines
+    test_folder: tests/sim/combat/       # optional; owned exclusively too
+    prompt_file: work/prompts/combat.md
+    module_report: work/modules/combat/module_report.md          # default shown
+    interface_request: work/modules/combat/interface_request.md  # default shown
+    allowed_files: []             # extra files/folders outside the task's folder, rarely needed
     acceptance:                   # text lines; quote a line that contains ": "
       - Taking damage lowers health and emits health_changed(old, new)
       - Health never drops below 0; reaching 0 emits died once
       - 'The label reads "health: 85" after a 15-point hit'
-    effort: xhigh                 # optional: this module's implementer only
-integration:                      # optional glue stage, run by /module-pipeline:integrate
+    effort: xhigh                 # optional: this task's implementer only
+  - id: battle-glue
+    feature: Connects spawning, combat and the HUD
+    glue: true                    # a glue task: its systems are glue modules
+    depends_on: [combat, enemies, hud]   # the tasks it joins; it runs once they are merged
+    owned_folder: src/game/battle/
+    systems:                             # glue split by function, never one manager for everything
+      - { id: enemy-manager, path: src/game/battle/enemy_manager.gd }
+      - { id: hud-binder, path: src/game/battle/hud_binder.gd }
+    estimated_lines: 500
+    prompt_file: work/prompts/battle-glue.md
+integration:                      # optional last layer of glue: the entry point; run by /module-pipeline:run
   prompt_file: work/prompts/integration.md
   allowed_files:
-    - src/game/                   # glue/composition only, never inside a module folder
+    - src/main/                   # the entry point and files at the project root, never inside a task's folder
   acceptance:
     - The game starts, spawns the player and enemies, and the HUD tracks health
+  # systems:                      # in a plan without a glue task: the glue modules it writes itself,
+  #   - { id: enemy-manager, path: src/main/enemy_manager.gd }   # inside allowed_files, one per function
+  estimated_lines: 200
   effort: xhigh                   # optional: same as effort.integrator
 ```
+
+## Systems, glue and tasks
+
+The code is divided by what it does; the size of the project only decides how
+many agents build it.
+
+- A **system** does one thing and lives in its own folder or file. It reads
+  the data layer and the shared layer and knows no other system.
+- A **glue module** connects systems. It is not meant to be reused. Glue is
+  split by function too: several small glue modules, never one manager.
+- A **task** is what one agent builds: one `owned_folder` holding the systems
+  (or, with `glue: true`, the glue modules) listed under `systems`. A task
+  without `systems` is one system, its whole folder.
+
+`depends_on` is for glue: a glue task names the tasks it joins and runs once
+they are merged. A task that is not glue depends only on the shared layer,
+which is added for it, so all such tasks run in the same wave. Validate warns
+when a task that is not glue depends on another task: connect the two in a
+glue task, or make them one system if they cannot be separated.
+
+`integration` is the last layer of glue: the entry point, the one place that
+calls the systems in the order of a step, and files at the project root. In a
+small plan without a glue task it holds the glue modules itself and lists
+them under its own `systems`, with paths inside its `allowed_files`.
+
+Validate reports the division as `architecture`: the number of systems and
+glue modules, and `gluePercent`, the share of glue in the estimated lines
+(only when every task and the integration carry `estimated_lines`). The
+module stage's report shows the share that was actually built.
 
 ## Model and thinking effort
 
@@ -97,15 +146,16 @@ run at `medium`.
 
 ## Shared layer
 
-Without a shared layer every module agent writes its own copy of the same
+Without a shared layer every agent writes its own copy of the same value,
 helper, tolerance, color or test fixture, because it only sees the contracts,
-not the other modules' code. With two or more modules the manifest must name
-one:
+not the other tasks' code. The shared layer also holds the data layer: the
+tuning values, texts and ids every system reads instead of writing its own.
+With two or more tasks the manifest must name one:
 
-- `shared_layer.task`: the module that builds it in this run. It may not have
-  `depends_on`; every other module gets it as a dependency, so it runs alone
+- `shared_layer.task`: the task that builds it in this run. It may not have
+  `depends_on`; every other task gets it as a dependency, so it runs alone
   in the first wave. Only it may have a `support_folder`, for the test
-  fixtures other modules' tests import.
+  fixtures other tasks' tests import.
 - `shared_layer.existing`: folders that already hold it, for rework runs and
   existing code bases. They must exist.
 
@@ -193,19 +243,22 @@ never cause a scope violation.
 
 ## Rules the validator enforces
 
-- Every module task has an `owned_folder` (legacy manifests may use `owned_script` for a single file).
-- With two or more modules, `shared_layer` names a task (without `depends_on`) or existing folders,
+- Every task has an `owned_folder` (legacy manifests may use `owned_script` for a single file).
+- With two or more tasks, `shared_layer` names a task (without `depends_on`) or existing folders,
   and `shared_layer.rules` names the cross-module rules file, which must exist and cover every topic.
-  With one module, `shared_layer` may be left out or name `rules` alone.
-- `project.estimated_lines`, when set, is a positive whole number.
-- One module folder has one owner: no two modules may own the same folder or nested folders
+  With one task, `shared_layer` may be left out or name `rules` alone.
+- `project.estimated_lines` and a task's or the integration's `estimated_lines`, when set, are positive whole numbers.
+- One task folder has one owner: no two tasks may own the same folder or nested folders
   (`src/player/` and `src/player/ai/` clash; `src/player/` and `src/players/` do not). Test and support folders count too.
-- No task, including integration, may list a path inside another module's owned folder or test folder.
-- `depends_on` must name existing module ids and must not form a cycle. Modules run in waves:
-  a module starts after everything it depends on is merged.
+- `systems` entries have an `id` and a `path` inside the task's `owned_folder`; within a task the ids are
+  unique and the paths do not overlap. `glue` is `true` or `false`.
+- No task, including integration, may list a path inside another task's owned folder or test folder.
+- `depends_on` must name existing task ids and must not form a cycle. Tasks run in waves:
+  a task starts after everything it depends on is merged. A task that is not glue and depends on
+  another task (other than the shared layer) gets a warning, not an error.
 - Every `prompt_file` must exist.
 - The owned folder, test folder, support folder, module report and interface request are always
-  writable by that module; `allowed_files` only adds to them. Globs are rejected; use a folder ending in `/`.
+  writable by that task; `allowed_files` only adds to them. Globs are rejected; use a folder ending in `/`.
 - `generated_files` entries are a file-name pattern without `/` (only `*` as a wildcard), a folder
   ending in `/`, or one exact path.
 - Effort levels are `low`, `medium`, `high`, `xhigh` or `max`; `effort.preset` is `economy`,

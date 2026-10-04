@@ -1,13 +1,13 @@
 {
   "name": "module-pipeline",
   "displayName": "Module Pipeline",
-  "version": "0.11.0",
-  "description": "Spec-driven multi-agent pipeline: a Main Architect splits a spec into module folders with one owner each, module agents implement them in parallel isolated worktrees under enforced write scopes, every accepted module is committed on a per-run branch, reviewers gate each stage, and rework runs close the loop.",
+  "version": "0.12.0",
+  "description": "Spec-driven multi-agent pipeline for game development: a Main Architect divides a game spec into a data layer, reusable systems that never reference each other and small glue modules, agents build them in parallel isolated worktrees under enforced write scopes, every accepted task is committed on a per-run branch, reviewers gate each stage, and rework runs close the loop.",
   "author": {
     "name": "Nero"
   },
   "homepage": "https://github.com/spardanviro/module-pipeline#readme",
   "repository": "https://github.com/spardanviro/module-pipeline",
   "license": "MIT",
-  "keywords": ["multi-agent", "workflow", "worktree", "spec-driven", "code-ownership"]
+  "keywords": ["game-development", "gamedev", "multi-agent", "workflow", "worktree", "spec-driven", "code-ownership"]
 }
